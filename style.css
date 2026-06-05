@@ -14,7 +14,7 @@
 .pr-marker{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:white;border:3px solid var(--green);box-shadow:0 4px 16px rgba(0,0,0,.22);font-weight:900;color:var(--green2);font-size:.74rem}.pr-marker.active{background:var(--green);color:white;transform:scale(1.12)}.pr-marker.dim{opacity:.25}.context-marker{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#fff;border:2px solid #007aff;box-shadow:0 4px 15px rgba(0,0,0,.22);font-size:1rem}.webcam-marker{border-color:#9b59ff}.home-marker{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#0d3b35;color:white;border:3px solid white;box-shadow:0 4px 16px rgba(0,0,0,.22)}
 @media(min-width:820px){.carousel{padding:0 calc(50vw - 165px) 8px}.trail-card{flex-basis:330px}.detail-sheet{left:50%;right:18px;border-radius:28px;bottom:calc(var(--safe-bot) + 78px);padding-bottom:18px;max-height:calc(100dvh - 118px)}.journal{right:auto;width:420px}.modebar{left:50%;transform:translateX(-50%);width:420px}.layer-panel,.search-panel{left:auto;width:390px}.travel-panel{left:auto;width:390px}}
 
-/* V3.3.1 Safe-Area / Floating UX Refinement */
+/* V3.3.2 Safe-Area / Floating UX Refinement */
 :root{
   --dock-bottom:max(4px, calc(env(safe-area-inset-bottom,0px) - 18px));
   --sheet-bottom-pad:max(72px, calc(env(safe-area-inset-bottom,0px) + 58px));
@@ -36,3 +36,29 @@ html,body,#app{height:100dvh;min-height:-webkit-fill-available;}
 .endpoint-marker{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:#fff;border:3px solid #0b6b55;box-shadow:0 6px 18px rgba(0,0,0,.28);font-size:.72rem;font-weight:900;color:#0b6b55}
 .endpoint-marker.end{border-color:#ff3b30;color:#ff3b30}.endpoint-marker.drive{border-color:#007aff;color:#007aff}.endpoint-marker.home{border-color:#0d3b35;color:#0d3b35}
 .profile-card{background:white;border:1px solid var(--line);border-radius:18px;padding:12px;margin-top:10px}.profile-card svg{display:block;width:100%;height:132px}.profile-card .profile-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:.76rem;margin-top:6px}.profile-note{font-size:.72rem;color:var(--muted);line-height:1.35;margin-top:6px}.sheet-section h4{margin:12px 0 6px}.context-card .ct small{display:block;color:var(--muted);margin-top:3px}.leaflet-control-container .leaflet-bottom.leaflet-right{display:none!important}
+
+/* V3.3.2 Interaction / Safe-Area / Marker Refinement */
+:root{
+  --dock-bottom:0px;
+  --sheet-bottom-pad:58px;
+}
+html,body,#app,#map{
+  width:100%;height:100dvh;min-height:100svh;min-height:-webkit-fill-available;
+  overflow:hidden;position:relative;margin:0;padding:0;
+}
+#map{position:fixed;inset:0 0 0 0;height:100dvh;min-height:-webkit-fill-available;}
+.modebar{left:10px;right:10px;bottom:0;border-radius:22px 22px 0 0;padding:7px 7px max(7px, env(safe-area-inset-bottom,0px));}
+.carousel-shell{bottom:calc(50px + max(4px, env(safe-area-inset-bottom,0px) * .20));}
+.journal{bottom:calc(50px + max(4px, env(safe-area-inset-bottom,0px) * .20));}
+.toast{bottom:calc(104px + max(4px, env(safe-area-inset-bottom,0px) * .20));}
+.detail-sheet{max-height:calc(100dvh - var(--safe-top) - 4px);padding-bottom:calc(58px + max(8px, env(safe-area-inset-bottom,0px) * .25));}
+
+.pr-marker{width:42px;height:42px;border-radius:50%;position:relative;z-index:10;border-width:3px;font-size:.72rem;isolation:isolate;}
+.pr-marker .pr-num{position:relative;z-index:4;line-height:1;text-align:center;text-shadow:0 1px 0 rgba(255,255,255,.7)}
+.pr-marker.active .pr-num{text-shadow:none;color:white;}
+.pr-marker .status-dot{position:absolute;right:-1px;bottom:-1px;width:12px;height:12px;border-radius:50%;border:2px solid #fff;z-index:5;background:#9aa8a4;box-shadow:0 2px 6px rgba(0,0,0,.22)}
+.pr-marker .status-dot.open{background:#24aa5a}.pr-marker .status-dot.limited{background:#ff9500}.pr-marker .status-dot.closed{background:#ff3b30}.pr-marker .status-dot.unknown{background:#9aa8a4}
+.pr-marker .fav-dot{position:absolute;left:-5px;top:-5px;width:17px;height:17px;border-radius:50%;display:grid;place-items:center;background:#ffd54f;color:#4d3900;border:2px solid #fff;font-size:.62rem;line-height:1;z-index:6;box-shadow:0 2px 8px rgba(0,0,0,.22)}
+.pr-marker.status-open{border-color:#24aa5a}.pr-marker.status-limited{border-color:#ff9500}.pr-marker.status-closed{border-color:#ff3b30}.pr-marker.status-unknown{border-color:#0b6b55}
+.context-marker,.endpoint-marker,.home-marker{z-index:1}.context-marker{opacity:.88;transform:scale(.88)}.endpoint-marker{transform:scale(.88)}
+.trail-card .profile-note .status-badge{display:none}.trail-card .profile-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

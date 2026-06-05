@@ -12,7 +12,7 @@ const hav = (a,b,c,d) => { const R=6371, to=x=>x*Math.PI/180; const dLat=to(c-a)
 let state = {
   mode:'map', level:'all', query:'', onlyFav:false, base:'topo',
   layers:{pins:true, tracks:true, drives:true, hiking:true, context:false},
-  selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false,
+  selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false, autoContext:false,
   sheetTab:'overview', travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
 };
 
@@ -70,13 +70,13 @@ function endpointIcon(label, cls=''){
 }
 function renderEndpoints(id){
   layers.endpoints.clearLayers();
-  if(!state.solo || !id) return;
+  if(!id) return;
   const tr=D.tracks[id]||[], dr=D.drives[id]||[], t=byId[id];
   if(tr.length){
-    L.marker(tr[0],{icon:endpointIcon('S'),title:'Start'}).bindPopup('<b>Start Wanderung</b>').addTo(layers.endpoints);
-    L.marker(tr[tr.length-1],{icon:endpointIcon('Z','end'),title:'Ziel'}).bindPopup('<b>Ziel Wanderung</b>').addTo(layers.endpoints);
+    L.marker(tr[0],{icon:endpointIcon('S'),title:'Start',zIndexOffset:900}).bindPopup('<b>Start Wanderung</b>').addTo(layers.endpoints);
+    L.marker(tr[tr.length-1],{icon:endpointIcon('Z','end'),title:'Ziel',zIndexOffset:900}).bindPopup('<b>Ziel Wanderung</b>').addTo(layers.endpoints);
   }
-  if(dr.length){ L.marker(dr[dr.length-1],{icon:endpointIcon('P','drive'),title:'Anfahrt Ziel'}).bindPopup('<b>Anfahrt / Parkplatz</b>').addTo(layers.endpoints); }
+  if(dr.length){ L.marker(dr[dr.length-1],{icon:endpointIcon('P','drive'),title:'Anfahrt Ziel',zIndexOffset:850}).bindPopup('<b>Anfahrt / Parkplatz</b>').addTo(layers.endpoints); }
   if(t && (!tr.length && !dr.length)) L.marker([t.lat,t.lon],{icon:endpointIcon('PR'),title:t.name}).addTo(layers.endpoints);
 }
 function syncOverlayLayers(){
@@ -89,10 +89,11 @@ function syncOverlayLayers(){
 
 function markerHtml(t){
   const active = state.selectedTrailId===t.id; const dim=state.solo && !active;
-  const st=trailStatus(t);
-  return `<div class="pr-marker ${active?'active':''} ${dim?'dim':''} status-${st.key}">${esc(t.number.replace('PR ','').replace('.','·'))}</div>`;
+  const st=trailStatus(t); const fav=state.favs.has(t.id);
+  const nr=esc(t.number.replace('PR ','').replace('.','·'));
+  return `<div class="pr-marker ${active?'active':''} ${dim?'dim':''} status-${st.key} ${fav?'is-fav':''}"><span class="pr-num">${nr}</span><i class="status-dot ${st.key}"></i>${fav?'<i class="fav-dot">★</i>':''}</div>`;
 }
-function markerIcon(t){ return L.divIcon({className:'',html:markerHtml(t),iconSize:[34,34],iconAnchor:[17,17]}); }
+function markerIcon(t){ return L.divIcon({className:'',html:markerHtml(t),iconSize:[42,42],iconAnchor:[21,21]}); }
 function addLine(group, coords, opts){ if(!coords || coords.length<2) return null; return L.polyline(coords, opts).addTo(group); }
 
 function renderMap(){
@@ -101,7 +102,7 @@ function renderMap(){
   const showList = state.solo && state.selectedTrailId ? [byId[state.selectedTrailId]].filter(Boolean) : filtered;
   if(state.layers.pins){
     showList.forEach(t=>{
-      const m=L.marker([t.lat,t.lon],{icon:markerIcon(t),title:`${t.number} ${t.name}`}).on('click',()=>selectTrail(t.id,{fromMap:true})).addTo(layers.pins);
+      const m=L.marker([t.lat,t.lon],{icon:markerIcon(t),title:`${t.number} ${t.name}`,zIndexOffset:(state.selectedTrailId===t.id?2200:1200)}).on('click',()=>selectTrail(t.id,{fromMap:true})).addTo(layers.pins);
       m.bindPopup(`<b>${esc(t.number)} · ${esc(t.name)}</b><br>${esc(t.region)}<br>${fmtKm(t.distanceKm)} · ${fmtMin(t.driveMin)}`);
       markers[t.id]=m;
     });
@@ -121,11 +122,15 @@ function renderMap(){
 function clearContext(){ state.selectedPoiIds=[]; state.selectedWebcamIds=[]; layers.context?.clearLayers(); layers.highlight?.clearLayers(); }
 function selectTrail(id, opts={}){
   if(!byId[id]) return;
-  if(state.selectedTrailId!==id) clearContext();
+  const changed = state.selectedTrailId!==id;
+  if(changed) clearContext();
   state.selectedTrailId=id; state.sheetTab='overview';
+  // Aktive PR zeigt ihren GPX-Track und die KML-Anfahrt immer automatisch.
+  state.layers.tracks=true; state.layers.drives=true;
   $('carouselShell').classList.remove('hidden');
-  renderMap(); renderCarousel(); renderSheet(); renderJournal();
-  if(opts.fromMap) centerTrail(id); else centerTrail(id, false);
+  renderMap(); renderCarousel(); renderSheet(); renderJournal(); updateLayerButtons();
+  // Nur Pin-/Journal-Auswahl zentriert die Karte. Kachel-Tippen im Karussell lässt die Karte bewusst in Ruhe.
+  if(opts.fromMap || opts.fromJournal) centerTrail(id, false);
 }
 function centerTrail(id, fit=false){
   const t=byId[id]; if(!t||!map) return;
@@ -154,7 +159,7 @@ function renderCarousel(){
   const list=carouselList();
   root.innerHTML=list.map(t=>cardHtml(t)).join('');
   root.querySelectorAll('.trail-card').forEach(el=>{
-    el.addEventListener('click', e=>{ if(e.target.closest('button')) return; selectTrail(el.dataset.id); });
+    el.addEventListener('click', e=>{ if(e.target.closest('button')) return; selectTrail(el.dataset.id,{fromCarousel:true}); });
   });
   root.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); openSheet('overview');}));
   root.querySelectorAll('[data-act="solo"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleSolo();}));
@@ -199,7 +204,7 @@ function renderSheet(){
   tab.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>window.open(b.dataset.open,'_blank'));
 }
 function overviewHtml(t){
-  return `<div class="sheet-section"><h4>Kontextnavigation</h4><p class="muted">Kachel nach oben = Details. Webcams und Sehenswürdigkeiten werden nur für den aktiven PR-Kontext eingeblendet. Beim Wechsel zum nächsten PR werden alte Kontextmarker gelöscht.</p></div>
+  return `<div class="sheet-section"><h4>Kontextnavigation</h4><p class="muted">Aktive PR zeigt GPX und KML automatisch. Webcams und Sehenswürdigkeiten bleiben PR-gebunden; beim Wechsel zum nächsten PR werden alte Kontextmarker gelöscht.</p></div>
   <div class="card-actions"><button class="pillbtn primary" onclick="window.PRX.openTab('webcams')">Webcams</button><button class="pillbtn primary" onclick="window.PRX.openTab('pois')">Sehenswürdigkeiten</button><button class="pillbtn" onclick="window.PRX.toggleSolo()">Solo</button><button class="pillbtn" onclick="window.PRX.addTrailTravel()">Zur Reise</button></div>${profileHtml(t)}
   <div class="sheet-section"><h4>Hinweis</h4><p class="muted">${esc(t.hint||'Keine Zusatznotiz vorhanden.')}</p></div>`;
 }
@@ -243,8 +248,8 @@ function renderContextMarkers(){
   const camIcon=L.divIcon({className:'',html:'<div class="context-marker webcam-marker">◉</div>',iconSize:[30,30],iconAnchor:[15,15]});
   const showPois = state.selectedPoiIds.length ? D.pois.filter(p=>state.selectedPoiIds.includes(p.id)) : (state.layers.context&&state.solo&&state.selectedTrailId?relatedPois(byId[state.selectedTrailId]).slice(0,4):[]);
   const showCams = state.selectedWebcamIds.length ? D.webcams.filter(p=>state.selectedWebcamIds.includes(p.id)) : (state.layers.context&&state.solo&&state.selectedTrailId?relatedWebcams(byId[state.selectedTrailId]).slice(0,3):[]);
-  showPois.forEach(p=>L.marker([p.lat,p.lon],{icon:poiIcon,title:p.name}).bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.cat||'Sehenswürdigkeit')}`).addTo(layers.context));
-  showCams.forEach(p=>L.marker([p.lat,p.lon],{icon:camIcon,title:p.name}).bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.note||'Webcam')}`).addTo(layers.context));
+  showPois.forEach(p=>L.marker([p.lat,p.lon],{icon:poiIcon,title:p.name,zIndexOffset:350}).bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.cat||'Sehenswürdigkeit')}`).addTo(layers.context));
+  showCams.forEach(p=>L.marker([p.lat,p.lon],{icon:camIcon,title:p.name,zIndexOffset:360}).bindPopup(`<b>${esc(p.name)}</b><br>${esc(p.note||'Webcam')}`).addTo(layers.context));
 }
 function focusContext(id, kind){
   const arr=kind==='poi'?D.pois:D.webcams; const x=arr.find(p=>p.id===id); if(!x) return;
@@ -260,7 +265,7 @@ function addTravel(id, kind){
 function renderJournal(){
   const root=$('journalList'); $('journalCount').textContent=`${filtered.length} Treffer`;
   root.innerHTML=filtered.map(t=>`<button class="journal-item" data-id="${esc(t.id)}"><b>${esc(t.number)} · ${esc(t.name)}</b><small>${esc(t.region)} · ${fmtKm(t.distanceKm)} · ${fmtMin(t.driveMin)} · ${esc(t.level||'k.A.')}</small></button>`).join('');
-  root.querySelectorAll('button').forEach(b=>b.onclick=()=>{setMode('map');selectTrail(b.dataset.id,{fromMap:true});});
+  root.querySelectorAll('button').forEach(b=>b.onclick=()=>{setMode('map');selectTrail(b.dataset.id,{fromJournal:true});});
 }
 function renderTravel(){
   const root=$('travelList');
