@@ -8,12 +8,13 @@ const fmtKm = v => v ? `${String(Math.round(v*10)/10).replace('.',',')} km` : '�
 const fmtMin = v => v ? `${v} min` : '–';
 const normLevel = s => (String(s||'').toLowerCase().includes('leicht')?'leicht':String(s||'').toLowerCase().includes('schwer')?'schwer':String(s||'').toLowerCase().includes('mittel')?'mittel':'k.A.');
 const hav = (a,b,c,d) => { const R=6371, to=x=>x*Math.PI/180; const dLat=to(c-a), dLon=to(d-b); const x=Math.sin(dLat/2)**2+Math.cos(to(a))*Math.cos(to(c))*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(x)); };
+const cssEsc = s => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 
 let state = {
   mode:'map', level:'all', query:'', onlyFav:false, base:'topo',
   layers:{pins:true, tracks:true, drives:true, hiking:true, context:false},
   selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false, autoContext:false,
-  sheetTab:'overview', travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
+  sheetTab:'overview', carouselSheetState:'card', carouselBound:false, carouselProgrammatic:false, travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
 };
 
 const trails = D.trails;
@@ -128,8 +129,8 @@ function selectTrail(id, opts={}){
   // Aktive PR zeigt ihren GPX-Track und die KML-Anfahrt immer automatisch.
   state.layers.tracks=true; state.layers.drives=true;
   $('carouselShell').classList.remove('hidden');
-  renderMap(); renderCarousel(); renderSheet(); renderJournal(); updateLayerButtons();
-  // Nur Pin-/Journal-Auswahl zentriert die Karte. Kachel-Tippen im Karussell lässt die Karte bewusst in Ruhe.
+  renderMap(); renderCarousel({centerActive: !!(opts.fromMap || opts.fromJournal)}); renderSheet(); renderJournal(); updateLayerButtons(); markActiveCarouselCard();
+  // Nur Pin-/Journal-Auswahl zentriert die Karte. Carousel-Fokus wechselt nur die Datenlayer.
   if(opts.fromMap || opts.fromJournal) centerTrail(id, false);
 }
 function centerTrail(id, fit=false){
@@ -144,27 +145,94 @@ function fitAll(){
 }
 
 function carouselList(){
-  if(!state.selectedTrailId) return filtered;
-  const a=byId[state.selectedTrailId];
-  return [...filtered].sort((x,y)=>{
-    if(x.id===a.id) return -1; if(y.id===a.id) return 1;
-    const dx=hav(a.lat,a.lon,x.lat,x.lon), dy=hav(a.lat,a.lon,y.lat,y.lon);
-    const rx=(x.region===a.region? -8:0), ry=(y.region===a.region? -8:0);
-    return (dx+rx)-(dy+ry);
-  }).slice(0, Math.min(filtered.length, 16));
+  // Stage 1: stabile Reihenfolge. Die aktive Kachel wird nicht mehr nach vorn sortiert.
+  // Dadurch entsteht kein seitliches Springen beim PR-Wechsel.
+  return [...filtered];
 }
-function renderCarousel(){
+function renderCarousel(opts={}){
   const root=$('carousel'); if(!root) return;
   if(!state.selectedTrailId){ root.innerHTML=''; return; }
   const list=carouselList();
   root.innerHTML=list.map(t=>cardHtml(t)).join('');
+  bindCarouselFocus();
   root.querySelectorAll('.trail-card').forEach(el=>{
-    el.addEventListener('click', e=>{ if(e.target.closest('button')) return; selectTrail(el.dataset.id,{fromCarousel:true}); });
+    // Kachel-Tap ist nicht mehr die primäre Aktivierung. PR-Wechsel erfolgt über Zentrierung.
+    el.addEventListener('click', e=>{ if(e.target.closest('button')) return; });
   });
-  root.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); openSheet('overview');}));
+  root.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); setCarouselSheetState('full'); openSheet('overview');}));
   root.querySelectorAll('[data-act="solo"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleSolo();}));
   root.querySelectorAll('[data-act="fav"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleFav(b.closest('.trail-card').dataset.id);}));
-  const active=root.querySelector('.trail-card.active'); if(active) setTimeout(()=>active.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}),50);
+  markActiveCarouselCard();
+  if(opts.centerActive){ centerActiveCarouselCard('auto'); }
+}
+function bindCarouselFocus(){
+  const root=$('carousel'); if(!root || state.carouselBound) return;
+  state.carouselBound=true;
+  let t=null;
+  const schedule=()=>{
+    clearTimeout(t);
+    t=setTimeout(()=>detectCenteredTrail(),120);
+  };
+  root.addEventListener('scroll', schedule, {passive:true});
+  root.addEventListener('scrollend', ()=>detectCenteredTrail(), {passive:true});
+}
+function detectCenteredTrail(){
+  const root=$('carousel'); if(!root || state.carouselProgrammatic) return;
+  const cards=[...root.querySelectorAll('.trail-card')];
+  if(!cards.length) return;
+  const cx=root.getBoundingClientRect().left + root.clientWidth/2;
+  let best=null, dist=Infinity;
+  cards.forEach(card=>{
+    const r=card.getBoundingClientRect();
+    const d=Math.abs((r.left+r.width/2)-cx);
+    if(d<dist){dist=d; best=card;}
+  });
+  if(best && best.dataset.id && best.dataset.id!==state.selectedTrailId){
+    setActiveTrailFromCarouselFocus(best.dataset.id);
+  } else {
+    markActiveCarouselCard();
+  }
+}
+function markActiveCarouselCard(){
+  const root=$('carousel'); if(!root) return;
+  root.querySelectorAll('.trail-card').forEach(card=>card.classList.toggle('active', card.dataset.id===state.selectedTrailId));
+  updatePeekInfo();
+}
+function centerActiveCarouselCard(behavior='smooth'){
+  const root=$('carousel'); if(!root || !state.selectedTrailId) return;
+  const active=root.querySelector(`.trail-card[data-id="${cssEsc(state.selectedTrailId)}"]`);
+  if(!active) return;
+  state.carouselProgrammatic=true;
+  active.scrollIntoView({inline:'center',block:'nearest',behavior});
+  setTimeout(()=>{state.carouselProgrammatic=false; markActiveCarouselCard();},260);
+}
+function setActiveTrailFromCarouselFocus(id){
+  if(!byId[id] || id===state.selectedTrailId) return;
+  clearContext();
+  state.selectedTrailId=id; state.sheetTab='overview';
+  state.layers.tracks=true; state.layers.drives=true;
+  $('carouselShell').classList.remove('hidden');
+  renderMap(); renderSheet(); renderJournal(); updateLayerButtons(); markActiveCarouselCard();
+}
+function updatePeekInfo(){
+  const el=$('carouselPeekInfo'), t=byId[state.selectedTrailId];
+  if(!el || !t) return;
+  const st=trailStatus(t);
+  el.innerHTML=`<b>${esc(t.number)}</b><span>${esc(t.name)}</span><em>${fmtKm(t.distanceKm)} · ${esc(st.label)}</em>`;
+}
+function setCarouselSheetState(next){
+  const shell=$('carouselShell'); if(!shell) return;
+  const allowed=['peek','card','half','full'];
+  if(!allowed.includes(next)) next='card';
+  state.carouselSheetState=next;
+  shell.dataset.sheetState=next;
+  updatePeekInfo();
+}
+function stepCarouselSheet(dir){
+  const order=['peek','card','half','full'];
+  const i=Math.max(0,order.indexOf(state.carouselSheetState));
+  setCarouselSheetState(order[Math.max(0,Math.min(order.length-1,i+dir))]);
+  if(state.carouselSheetState==='full') openSheet('overview');
 }
 function cardHtml(t){
   const lev=normLevel(t.level); const active=t.id===state.selectedTrailId; const fav=state.favs.has(t.id);
@@ -295,8 +363,10 @@ function bind(){
   document.querySelectorAll('[data-layer]').forEach(b=>b.onclick=()=>{const k=b.dataset.layer; state.layers[k]=!state.layers[k]; updateLayerButtons(); renderMap();});
   document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
   $('closeTravel').onclick=()=>setMode('map');
-  $('sheetHandle').onclick=()=>openSheet('overview'); $('sheetGrip').onclick=closeSheet;
+  $('sheetHandle').onclick=()=>stepCarouselSheet(1); $('sheetGrip').onclick=closeSheet;
+  setCarouselSheetState(state.carouselSheetState);
   bindSheetDrag();
+  bindCarouselSheetDrag();
 }
 
 function bindSheetDrag(){
@@ -309,6 +379,19 @@ function bindSheetDrag(){
 }
 
 
+function bindCarouselSheetDrag(){
+  const shell=$('carouselShell'), handle=$('sheetHandle'); if(!shell||!handle||handle._bound) return; handle._bound=true;
+  let startY=0, dy=0, dragging=false;
+  handle.addEventListener('pointerdown',e=>{dragging=true; startY=e.clientY; dy=0; shell.classList.add('dragging'); handle.setPointerCapture(e.pointerId);});
+  handle.addEventListener('pointermove',e=>{ if(!dragging) return; dy=e.clientY-startY; });
+  handle.addEventListener('pointerup',e=>{
+    if(!dragging) return; dragging=false; shell.classList.remove('dragging'); try{handle.releasePointerCapture(e.pointerId)}catch(_){};
+    if(dy>34) stepCarouselSheet(-1);
+    else if(dy<-34) stepCarouselSheet(1);
+  });
+  handle.addEventListener('pointercancel',()=>{dragging=false; shell.classList.remove('dragging');});
+}
+
 window.PRX={
   openTab(tab){ openSheet(tab); },
   addTrailTravel(){ if(state.selectedTrailId) addTravel(state.selectedTrailId,'trail'); },
@@ -316,6 +399,6 @@ window.PRX={
   toggleSolo(){ toggleSolo(); }
 };
 
-function boot(){ initMap(); bind(); applyFilters(); updateLayerButtons(); if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{}); }
+function boot(){ initMap(); bind(); applyFilters(); if(!state.selectedTrailId && filtered[0]) selectTrail(filtered[0].id,{fromJournal:true}); updateLayerButtons(); if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{}); }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 })();
