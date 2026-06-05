@@ -12,7 +12,7 @@ const hav = (a,b,c,d) => { const R=6371, to=x=>x*Math.PI/180; const dLat=to(c-a)
 let state = {
   mode:'map', level:'all', statusFilter:'all', query:'', onlyFav:false, base:'topo',
   layers:{pins:true, tracks:true, drives:true, hiking:true, context:false},
-  selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false, autoContext:false,
+  selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false, autoContext:false, carouselState:'peek',
   sheetTab:'overview', travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
 };
 
@@ -134,7 +134,7 @@ function selectTrail(id, opts={}){
   state.selectedTrailId=id; state.sheetTab='overview';
   // Aktive PR zeigt ihren GPX-Track und die KML-Anfahrt immer automatisch.
   state.layers.tracks=true; state.layers.drives=true;
-  $('carouselShell').classList.remove('hidden');
+  showCarousel();
   renderMap(); renderCarousel(); renderSheet(); renderJournal(); updateLayerButtons();
   // Nur Pin-/Journal-Auswahl zentriert die Karte. Kachel-Tippen im Karussell lässt die Karte bewusst in Ruhe.
   if(opts.fromMap || opts.fromJournal) centerTrail(id, false);
@@ -151,14 +151,24 @@ function fitAll(){
 }
 
 function carouselList(){
+  // V3.3.4: stabile Reihenfolge. Die aktive Karte wird nicht mehr an Position 1 umsortiert,
+  // damit das Karussell beim Wechsel nicht nach links springt.
   if(!state.selectedTrailId) return filtered;
-  const a=byId[state.selectedTrailId];
-  return [...filtered].sort((x,y)=>{
-    if(x.id===a.id) return -1; if(y.id===a.id) return 1;
-    const dx=hav(a.lat,a.lon,x.lat,x.lon), dy=hav(a.lat,a.lon,y.lat,y.lon);
-    const rx=(x.region===a.region? -8:0), ry=(y.region===a.region? -8:0);
-    return (dx+rx)-(dy+ry);
-  }).slice(0, Math.min(filtered.length, 16));
+  let list = filtered.length ? [...filtered] : trails;
+  if(!list.find(t=>t.id===state.selectedTrailId)) list=[byId[state.selectedTrailId],...list.filter(Boolean)];
+  return list.filter(Boolean).slice(0, Math.min(list.length, 24));
+}
+function showCarousel(){
+  const shell=$('carouselShell'); if(!shell) return;
+  state.carouselState='peek';
+  shell.classList.remove('hidden','collapsed','expanded','dragging');
+  shell.style.transform='';
+}
+function hideCarousel(){
+  const shell=$('carouselShell'); if(!shell) return;
+  state.carouselState='hidden';
+  shell.classList.add('hidden');
+  shell.style.transform='';
 }
 function renderCarousel(){
   const root=$('carousel'); if(!root) return;
@@ -171,7 +181,8 @@ function renderCarousel(){
   root.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); openSheet('overview');}));
   root.querySelectorAll('[data-act="solo"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleSolo();}));
   root.querySelectorAll('[data-act="fav"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleFav(b.closest('.trail-card').dataset.id);}));
-  const active=root.querySelector('.trail-card.active'); if(active) setTimeout(()=>active.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}),50);
+  root.querySelectorAll('[data-act="travel"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); addTravel(b.closest('.trail-card').dataset.id,'trail');}));
+  const active=root.querySelector('.trail-card.active'); if(active) setTimeout(()=>active.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}),40);
 }
 function cardHtml(t){
   const lev=normLevel(t.level); const active=t.id===state.selectedTrailId; const fav=state.favs.has(t.id);
@@ -179,8 +190,8 @@ function cardHtml(t){
     <div class="card-top"><div class="num">${esc(t.number)}</div><div style="display:flex;gap:6px;align-items:center">${statusHtml(t)}<div class="level ${esc(lev)}">${esc(t.level||'k.A.')}</div></div></div>
     <h3>${esc(t.name)}</h3>
     <div class="meta"><span>${fmtKm(t.distanceKm)}</span><span>${fmt(t.duration)}</span><span>${fmtMin(t.driveMin)}</span></div>
-    <div class="profile-note">${D.tracks[t.id]?'GPX ✓':'GPX –'} · ${D.drives[t.id]?'KML ✓':'KML –'} · ${statusHtml(t)}</div>
-    <div class="card-actions"><button class="pillbtn primary" data-act="detail">Details</button><button class="pillbtn" data-act="solo">${state.solo&&active?'Übersicht':'Solo'}</button><button class="pillbtn warn" data-act="fav">${fav?'★':'☆'}</button></div>
+    <div class="profile-note">Hochwischen für Details · ${D.tracks[t.id]?'GPX ✓':'GPX –'} · ${D.drives[t.id]?'KML ✓':'KML –'}</div>
+    <div class="card-actions"><button class="pillbtn" data-act="solo">${state.solo&&active?'Übersicht':'Solo'}</button><button class="pillbtn warn" data-act="fav">${fav?'★':'☆'}</button><button class="pillbtn" data-act="travel">Reise</button></div>
   </article>`;
 }
 function toggleSolo(){
@@ -190,7 +201,7 @@ function toggleSolo(){
 function toggleFav(id){ state.favs.has(id)?state.favs.delete(id):state.favs.add(id); save(); applyFilters(); renderSheet(); }
 
 function openSheet(tab='overview'){ state.sheetTab=tab; const sh=$('detailSheet'); sh.classList.remove('hidden'); sh.style.transform='translateY(0px)'; renderSheet(); }
-function closeSheet(){ $('detailSheet').classList.add('hidden'); }
+function closeSheet(){ const sh=$('detailSheet'); sh.classList.add('hidden'); sh.style.transform=''; }
 function renderSheet(){
   const id=state.selectedTrailId, t=byId[id], root=$('sheetContent'); if(!t){root.innerHTML=''; return;}
   root.innerHTML = `<div class="sheet-head"><div class="sheet-title"><small>${esc(t.number)} · ${esc(t.region||'Madeira')} · ${statusHtml(t)}</small><h2>${esc(t.name)}</h2></div><button class="close" id="closeSheet">×</button></div>
@@ -283,7 +294,7 @@ function renderTravel(){
 }
 function setMode(mode){
   state.mode=mode; document.querySelectorAll('.mode').forEach(b=>b.classList.toggle('active',b.dataset.mode===mode));
-  $('journal').classList.toggle('hidden',mode!=='journal'); $('travelPanel').classList.toggle('hidden',mode!=='travel');
+  $('journal').classList.toggle('hidden',mode!=='journal'); $('travelPanel').classList.toggle('hidden',mode!=='travel'); $('settingsPanel').classList.toggle('hidden',mode!=='settings');
   if(mode==='journal') renderJournal(); if(mode==='travel') renderTravel();
 }
 function updateLayerButtons(){
@@ -295,6 +306,7 @@ function setBase(base){ if(activeBase) map.removeLayer(activeBase); state.base=b
 function bind(){
   $('fitBtn').onclick=fitAll; $('locateBtn').onclick=()=>map.locate({setView:true,maxZoom:14});
   $('layerBtn').onclick=()=>$('layerPanel').classList.toggle('hidden'); $('closeLayers').onclick=()=>$('layerPanel').classList.add('hidden');
+  $('settingsBtn').onclick=()=>setMode('settings'); $('closeSettings').onclick=()=>setMode('map');
   $('searchBtn').onclick=()=>$('searchPanel').classList.toggle('hidden'); $('closeSearch').onclick=()=>$('searchPanel').classList.add('hidden');
   $('searchInput').oninput=e=>{state.query=e.target.value; applyFilters();};
   document.querySelectorAll('.filter-chip[data-filter="level"]').forEach(b=>b.onclick=()=>{state.level=b.dataset.value;document.querySelectorAll('.filter-chip[data-filter="level"]').forEach(x=>x.classList.toggle('active',x===b));applyFilters();fitAll();});
@@ -305,7 +317,11 @@ function bind(){
   document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
   $('closeTravel').onclick=()=>setMode('map');
   $('sheetHandle').onclick=()=>openSheet('overview'); $('sheetGrip').onclick=closeSheet;
-  bindSheetDrag();
+  document.querySelectorAll('[data-open-layers]').forEach(b=>b.onclick=()=>{$('layerPanel').classList.remove('hidden'); setMode('map');});
+  document.querySelectorAll('[data-fit-selected]').forEach(b=>b.onclick=()=>{setMode('map'); if(state.selectedTrailId) centerTrail(state.selectedTrailId,true); else fitAll();});
+  document.querySelectorAll('[data-reset-view]').forEach(b=>b.onclick=()=>{setMode('map'); state.solo=false; fitAll(); renderMap(); renderCarousel(); updateLayerButtons();});
+  document.querySelectorAll('[data-clear-selection]').forEach(b=>b.onclick=()=>{setMode('map'); state.selectedTrailId=null; state.solo=false; clearContext(); hideCarousel(); closeSheet(); renderMap();});
+  bindSheetDrag(); bindCarouselDrag();
 }
 
 function bindSheetDrag(){
@@ -317,6 +333,39 @@ function bindSheetDrag(){
   grip.addEventListener('pointercancel',()=>{dragging=false; sh.classList.remove('dragging'); sh.style.transform='translateY(0px)';});
 }
 
+function bindCarouselDrag(){
+  const shell=$('carouselShell'); if(!shell || shell._bound) return; shell._bound=true;
+  let startY=0, startX=0, dy=0, dx=0, dragging=false, vertical=false;
+  const start=e=>{
+    if(!state.selectedTrailId) return;
+    if(e.target.closest('button')) return;
+    dragging=true; vertical=false; startY=e.clientY; startX=e.clientX; dy=0; dx=0;
+    shell.classList.add('dragging');
+    try{shell.setPointerCapture(e.pointerId)}catch(_){}
+  };
+  const move=e=>{
+    if(!dragging) return;
+    dy=e.clientY-startY; dx=e.clientX-startX;
+    if(!vertical && Math.abs(dy)>16 && Math.abs(dy)>Math.abs(dx)*1.15) vertical=true;
+    if(vertical){
+      e.preventDefault();
+      const y=Math.max(-82, Math.min(150, dy));
+      shell.style.transform=`translateY(${y}px)`;
+    }
+  };
+  const end=e=>{
+    if(!dragging) return; dragging=false; shell.classList.remove('dragging');
+    try{shell.releasePointerCapture(e.pointerId)}catch(_){}
+    const wasVertical=vertical; vertical=false; shell.style.transform='';
+    if(!wasVertical) return;
+    if(dy < -54){ openSheet('overview'); }
+    else if(dy > 72){ hideCarousel(); toast('PR-Karussell ausgeblendet'); }
+  };
+  shell.addEventListener('pointerdown',start);
+  shell.addEventListener('pointermove',move,{passive:false});
+  shell.addEventListener('pointerup',end);
+  shell.addEventListener('pointercancel',end);
+}
 
 window.PRX={
   openTab(tab){ openSheet(tab); },
