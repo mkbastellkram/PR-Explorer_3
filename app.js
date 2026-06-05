@@ -8,13 +8,12 @@ const fmtKm = v => v ? `${String(Math.round(v*10)/10).replace('.',',')} km` : '�
 const fmtMin = v => v ? `${v} min` : '–';
 const normLevel = s => (String(s||'').toLowerCase().includes('leicht')?'leicht':String(s||'').toLowerCase().includes('schwer')?'schwer':String(s||'').toLowerCase().includes('mittel')?'mittel':'k.A.');
 const hav = (a,b,c,d) => { const R=6371, to=x=>x*Math.PI/180; const dLat=to(c-a), dLon=to(d-b); const x=Math.sin(dLat/2)**2+Math.cos(to(a))*Math.cos(to(c))*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(x)); };
-const cssEsc = s => (window.CSS && CSS.escape) ? CSS.escape(String(s)) : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
 
 let state = {
-  mode:'map', level:'all', query:'', onlyFav:false, base:'topo',
+  mode:'map', level:'all', statusFilter:'all', query:'', onlyFav:false, base:'topo',
   layers:{pins:true, tracks:true, drives:true, hiking:true, context:false},
   selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false, autoContext:false,
-  sheetTab:'overview', carouselSheetState:'card', carouselBound:false, carouselProgrammatic:false, travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
+  sheetTab:'overview', travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
 };
 
 const trails = D.trails;
@@ -46,7 +45,8 @@ function applyFilters(){
   filtered = trails.filter(t => {
     const lev=normLevel(t.level);
     const hay=[t.number,t.id,t.name,t.region,t.level].join(' ').toLowerCase();
-    return (state.level==='all'||lev===state.level) && (!q||hay.includes(q)) && (!state.onlyFav||state.favs.has(t.id));
+    const st=trailStatus(t).key;
+    return (state.level==='all'||lev===state.level) && (state.statusFilter==='all'||st===state.statusFilter) && (!q||hay.includes(q)) && (!state.onlyFav||state.favs.has(t.id));
   });
   $('resultCount').textContent = `${filtered.length} PRs im Filter`;
   renderMap(); renderJournal(); renderCarousel();
@@ -54,13 +54,19 @@ function applyFilters(){
 
 
 function trailStatus(t){
-  const raw = String(t.status || (D.statuses && D.statuses[t.id]) || '').toLowerCase();
-  if(raw.includes('offen') || raw.includes('open')) return {key:'open', label:'offen'};
-  if(raw.includes('eingesch') || raw.includes('limited') || raw.includes('teil')) return {key:'limited', label:'eingeschränkt'};
-  if(raw.includes('gesperrt') || raw.includes('closed')) return {key:'closed', label:'gesperrt'};
-  return {key:'unknown', label:'Status prüfen'};
+  const rec = (D.statuses && D.statuses[t.id]) || null;
+  const raw = String(t.status || (rec && rec.status) || rec || '').toLowerCase();
+  let key='unknown', label='Status prüfen';
+  if(raw.includes('offen') || raw.includes('open')) { key='open'; label='offen'; }
+  else if(raw.includes('eingesch') || raw.includes('restricted') || raw.includes('limited') || raw.includes('partially') || raw.includes('teil')) { key='limited'; label='eingeschränkt'; }
+  else if(raw.includes('gesperrt') || raw.includes('closed')) { key='closed'; label='gesperrt'; }
+  return {key, label, note:(rec&&rec.note)||'', source:(rec&&rec.source)||''};
 }
-function statusHtml(t){ const st=trailStatus(t); return `<span class="status-badge ${st.key}">${st.key==='open'?'●':st.key==='limited'?'▲':st.key==='closed'?'■':'?'} ${esc(st.label)}</span>`; }
+function statusHtml(t){ const st=trailStatus(t); return `<span class="status-badge ${st.key}" title="${esc(st.note||'')}"><i></i>${esc(st.label)}</span>`; }
+function statusSourceHtml(){
+  const m=D.statusMeta||{};
+  return `<div class="status-source">Status: ${esc(m.sourceLabel||'lokale Statusdatei')} · Stand ${esc(m.lastUpdated||'unbekannt')} · vor Wanderung offiziell prüfen.</div>`;
+}
 function lineCased(group, coords, color, weight=5, opacity=.9){
   if(!coords || coords.length<2) return;
   addLine(group, coords, {color:'#ffffff',weight:weight+3,opacity:.78,lineCap:'round',lineJoin:'round'});
@@ -129,8 +135,8 @@ function selectTrail(id, opts={}){
   // Aktive PR zeigt ihren GPX-Track und die KML-Anfahrt immer automatisch.
   state.layers.tracks=true; state.layers.drives=true;
   $('carouselShell').classList.remove('hidden');
-  renderMap(); renderCarousel({centerActive: !!(opts.fromMap || opts.fromJournal)}); renderSheet(); renderJournal(); updateLayerButtons(); markActiveCarouselCard();
-  // Nur Pin-/Journal-Auswahl zentriert die Karte. Carousel-Fokus wechselt nur die Datenlayer.
+  renderMap(); renderCarousel(); renderSheet(); renderJournal(); updateLayerButtons();
+  // Nur Pin-/Journal-Auswahl zentriert die Karte. Kachel-Tippen im Karussell lässt die Karte bewusst in Ruhe.
   if(opts.fromMap || opts.fromJournal) centerTrail(id, false);
 }
 function centerTrail(id, fit=false){
@@ -145,94 +151,27 @@ function fitAll(){
 }
 
 function carouselList(){
-  // Stage 1: stabile Reihenfolge. Die aktive Kachel wird nicht mehr nach vorn sortiert.
-  // Dadurch entsteht kein seitliches Springen beim PR-Wechsel.
-  return [...filtered];
+  if(!state.selectedTrailId) return filtered;
+  const a=byId[state.selectedTrailId];
+  return [...filtered].sort((x,y)=>{
+    if(x.id===a.id) return -1; if(y.id===a.id) return 1;
+    const dx=hav(a.lat,a.lon,x.lat,x.lon), dy=hav(a.lat,a.lon,y.lat,y.lon);
+    const rx=(x.region===a.region? -8:0), ry=(y.region===a.region? -8:0);
+    return (dx+rx)-(dy+ry);
+  }).slice(0, Math.min(filtered.length, 16));
 }
-function renderCarousel(opts={}){
+function renderCarousel(){
   const root=$('carousel'); if(!root) return;
   if(!state.selectedTrailId){ root.innerHTML=''; return; }
   const list=carouselList();
   root.innerHTML=list.map(t=>cardHtml(t)).join('');
-  bindCarouselFocus();
   root.querySelectorAll('.trail-card').forEach(el=>{
-    // Kachel-Tap ist nicht mehr die primäre Aktivierung. PR-Wechsel erfolgt über Zentrierung.
-    el.addEventListener('click', e=>{ if(e.target.closest('button')) return; });
+    el.addEventListener('click', e=>{ if(e.target.closest('button')) return; selectTrail(el.dataset.id,{fromCarousel:true}); });
   });
-  root.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); setCarouselSheetState('full'); openSheet('overview');}));
+  root.querySelectorAll('[data-act="detail"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); openSheet('overview');}));
   root.querySelectorAll('[data-act="solo"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleSolo();}));
   root.querySelectorAll('[data-act="fav"]').forEach(b=>b.addEventListener('click',e=>{e.stopPropagation(); toggleFav(b.closest('.trail-card').dataset.id);}));
-  markActiveCarouselCard();
-  if(opts.centerActive){ centerActiveCarouselCard('auto'); }
-}
-function bindCarouselFocus(){
-  const root=$('carousel'); if(!root || state.carouselBound) return;
-  state.carouselBound=true;
-  let t=null;
-  const schedule=()=>{
-    clearTimeout(t);
-    t=setTimeout(()=>detectCenteredTrail(),120);
-  };
-  root.addEventListener('scroll', schedule, {passive:true});
-  root.addEventListener('scrollend', ()=>detectCenteredTrail(), {passive:true});
-}
-function detectCenteredTrail(){
-  const root=$('carousel'); if(!root || state.carouselProgrammatic) return;
-  const cards=[...root.querySelectorAll('.trail-card')];
-  if(!cards.length) return;
-  const cx=root.getBoundingClientRect().left + root.clientWidth/2;
-  let best=null, dist=Infinity;
-  cards.forEach(card=>{
-    const r=card.getBoundingClientRect();
-    const d=Math.abs((r.left+r.width/2)-cx);
-    if(d<dist){dist=d; best=card;}
-  });
-  if(best && best.dataset.id && best.dataset.id!==state.selectedTrailId){
-    setActiveTrailFromCarouselFocus(best.dataset.id);
-  } else {
-    markActiveCarouselCard();
-  }
-}
-function markActiveCarouselCard(){
-  const root=$('carousel'); if(!root) return;
-  root.querySelectorAll('.trail-card').forEach(card=>card.classList.toggle('active', card.dataset.id===state.selectedTrailId));
-  updatePeekInfo();
-}
-function centerActiveCarouselCard(behavior='smooth'){
-  const root=$('carousel'); if(!root || !state.selectedTrailId) return;
-  const active=root.querySelector(`.trail-card[data-id="${cssEsc(state.selectedTrailId)}"]`);
-  if(!active) return;
-  state.carouselProgrammatic=true;
-  active.scrollIntoView({inline:'center',block:'nearest',behavior});
-  setTimeout(()=>{state.carouselProgrammatic=false; markActiveCarouselCard();},260);
-}
-function setActiveTrailFromCarouselFocus(id){
-  if(!byId[id] || id===state.selectedTrailId) return;
-  clearContext();
-  state.selectedTrailId=id; state.sheetTab='overview';
-  state.layers.tracks=true; state.layers.drives=true;
-  $('carouselShell').classList.remove('hidden');
-  renderMap(); renderSheet(); renderJournal(); updateLayerButtons(); markActiveCarouselCard();
-}
-function updatePeekInfo(){
-  const el=$('carouselPeekInfo'), t=byId[state.selectedTrailId];
-  if(!el || !t) return;
-  const st=trailStatus(t);
-  el.innerHTML=`<b>${esc(t.number)}</b><span>${esc(t.name)}</span><em>${fmtKm(t.distanceKm)} · ${esc(st.label)}</em>`;
-}
-function setCarouselSheetState(next){
-  const shell=$('carouselShell'); if(!shell) return;
-  const allowed=['peek','card','half','full'];
-  if(!allowed.includes(next)) next='card';
-  state.carouselSheetState=next;
-  shell.dataset.sheetState=next;
-  updatePeekInfo();
-}
-function stepCarouselSheet(dir){
-  const order=['peek','card','half','full'];
-  const i=Math.max(0,order.indexOf(state.carouselSheetState));
-  setCarouselSheetState(order[Math.max(0,Math.min(order.length-1,i+dir))]);
-  if(state.carouselSheetState==='full') openSheet('overview');
+  const active=root.querySelector('.trail-card.active'); if(active) setTimeout(()=>active.scrollIntoView({inline:'center',block:'nearest',behavior:'smooth'}),50);
 }
 function cardHtml(t){
   const lev=normLevel(t.level); const active=t.id===state.selectedTrailId; const fav=state.favs.has(t.id);
@@ -255,6 +194,7 @@ function closeSheet(){ $('detailSheet').classList.add('hidden'); }
 function renderSheet(){
   const id=state.selectedTrailId, t=byId[id], root=$('sheetContent'); if(!t){root.innerHTML=''; return;}
   root.innerHTML = `<div class="sheet-head"><div class="sheet-title"><small>${esc(t.number)} · ${esc(t.region||'Madeira')} · ${statusHtml(t)}</small><h2>${esc(t.name)}</h2></div><button class="close" id="closeSheet">×</button></div>
+    ${statusSourceHtml()}
     <div class="seg"><button data-tab="overview">Übersicht</button><button data-tab="profile">Profil</button><button data-tab="webcams">Webcams</button><button data-tab="pois">Sehenswürdigkeiten</button><button data-tab="drive">Anfahrt</button></div>
     <div class="facts"><div class="fact"><small>Distanz</small><b>${fmtKm(t.distanceKm)}</b></div><div class="fact"><small>Dauer</small><b>${fmt(t.duration)}</b></div><div class="fact"><small>Anfahrt</small><b>${fmtMin(t.driveMin)}</b></div><div class="fact"><small>Höhenmeter</small><b>${fmt(t.elev)} m</b></div></div>
     <div id="tabContent"></div>`;
@@ -358,15 +298,14 @@ function bind(){
   $('searchBtn').onclick=()=>$('searchPanel').classList.toggle('hidden'); $('closeSearch').onclick=()=>$('searchPanel').classList.add('hidden');
   $('searchInput').oninput=e=>{state.query=e.target.value; applyFilters();};
   document.querySelectorAll('.filter-chip[data-filter="level"]').forEach(b=>b.onclick=()=>{state.level=b.dataset.value;document.querySelectorAll('.filter-chip[data-filter="level"]').forEach(x=>x.classList.toggle('active',x===b));applyFilters();fitAll();});
+  document.querySelectorAll('.filter-chip[data-filter="status"]').forEach(b=>b.onclick=()=>{const next=state.statusFilter===b.dataset.value?'all':b.dataset.value;state.statusFilter=next;document.querySelectorAll('.filter-chip[data-filter="status"]').forEach(x=>x.classList.toggle('active',next!=="all"&&x.dataset.value===next));applyFilters();fitAll();});
   document.querySelector('.filter-chip[data-filter="fav"]').onclick=e=>{state.onlyFav=!state.onlyFav;e.currentTarget.classList.toggle('active',state.onlyFav);applyFilters();};
   document.querySelectorAll('[data-base]').forEach(b=>b.onclick=()=>setBase(b.dataset.base));
   document.querySelectorAll('[data-layer]').forEach(b=>b.onclick=()=>{const k=b.dataset.layer; state.layers[k]=!state.layers[k]; updateLayerButtons(); renderMap();});
   document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
   $('closeTravel').onclick=()=>setMode('map');
-  $('sheetHandle').onclick=()=>stepCarouselSheet(1); $('sheetGrip').onclick=closeSheet;
-  setCarouselSheetState(state.carouselSheetState);
+  $('sheetHandle').onclick=()=>openSheet('overview'); $('sheetGrip').onclick=closeSheet;
   bindSheetDrag();
-  bindCarouselSheetDrag();
 }
 
 function bindSheetDrag(){
@@ -379,19 +318,6 @@ function bindSheetDrag(){
 }
 
 
-function bindCarouselSheetDrag(){
-  const shell=$('carouselShell'), handle=$('sheetHandle'); if(!shell||!handle||handle._bound) return; handle._bound=true;
-  let startY=0, dy=0, dragging=false;
-  handle.addEventListener('pointerdown',e=>{dragging=true; startY=e.clientY; dy=0; shell.classList.add('dragging'); handle.setPointerCapture(e.pointerId);});
-  handle.addEventListener('pointermove',e=>{ if(!dragging) return; dy=e.clientY-startY; });
-  handle.addEventListener('pointerup',e=>{
-    if(!dragging) return; dragging=false; shell.classList.remove('dragging'); try{handle.releasePointerCapture(e.pointerId)}catch(_){};
-    if(dy>34) stepCarouselSheet(-1);
-    else if(dy<-34) stepCarouselSheet(1);
-  });
-  handle.addEventListener('pointercancel',()=>{dragging=false; shell.classList.remove('dragging');});
-}
-
 window.PRX={
   openTab(tab){ openSheet(tab); },
   addTrailTravel(){ if(state.selectedTrailId) addTravel(state.selectedTrailId,'trail'); },
@@ -399,6 +325,6 @@ window.PRX={
   toggleSolo(){ toggleSolo(); }
 };
 
-function boot(){ initMap(); bind(); applyFilters(); if(!state.selectedTrailId && filtered[0]) selectTrail(filtered[0].id,{fromJournal:true}); updateLayerButtons(); if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{}); }
+function boot(){ initMap(); bind(); applyFilters(); updateLayerButtons(); if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{}); }
 if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',boot); else boot();
 })();

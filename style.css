@@ -14,7 +14,7 @@
 .pr-marker{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:white;border:3px solid var(--green);box-shadow:0 4px 16px rgba(0,0,0,.22);font-weight:900;color:var(--green2);font-size:.74rem}.pr-marker.active{background:var(--green);color:white;transform:scale(1.12)}.pr-marker.dim{opacity:.25}.context-marker{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#fff;border:2px solid #007aff;box-shadow:0 4px 15px rgba(0,0,0,.22);font-size:1rem}.webcam-marker{border-color:#9b59ff}.home-marker{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#0d3b35;color:white;border:3px solid white;box-shadow:0 4px 16px rgba(0,0,0,.22)}
 @media(min-width:820px){.carousel{padding:0 calc(50vw - 165px) 8px}.trail-card{flex-basis:330px}.detail-sheet{left:50%;right:18px;border-radius:28px;bottom:calc(var(--safe-bot) + 78px);padding-bottom:18px;max-height:calc(100dvh - 118px)}.journal{right:auto;width:420px}.modebar{left:50%;transform:translateX(-50%);width:420px}.layer-panel,.search-panel{left:auto;width:390px}.travel-panel{left:auto;width:390px}}
 
-/* V3.3.2 Safe-Area / Floating UX Refinement */
+/* V3.3.3 Safe-Area / Floating UX Refinement */
 :root{
   --dock-bottom:max(4px, calc(env(safe-area-inset-bottom,0px) - 18px));
   --sheet-bottom-pad:max(72px, calc(env(safe-area-inset-bottom,0px) + 58px));
@@ -37,7 +37,7 @@ html,body,#app{height:100dvh;min-height:-webkit-fill-available;}
 .endpoint-marker.end{border-color:#ff3b30;color:#ff3b30}.endpoint-marker.drive{border-color:#007aff;color:#007aff}.endpoint-marker.home{border-color:#0d3b35;color:#0d3b35}
 .profile-card{background:white;border:1px solid var(--line);border-radius:18px;padding:12px;margin-top:10px}.profile-card svg{display:block;width:100%;height:132px}.profile-card .profile-meta{display:flex;justify-content:space-between;color:var(--muted);font-size:.76rem;margin-top:6px}.profile-note{font-size:.72rem;color:var(--muted);line-height:1.35;margin-top:6px}.sheet-section h4{margin:12px 0 6px}.context-card .ct small{display:block;color:var(--muted);margin-top:3px}.leaflet-control-container .leaflet-bottom.leaflet-right{display:none!important}
 
-/* V3.3.2 Interaction / Safe-Area / Marker Refinement */
+/* V3.3.3 Interaction / Safe-Area / Marker Refinement */
 :root{
   --dock-bottom:0px;
   --sheet-bottom-pad:58px;
@@ -64,49 +64,12 @@ html,body,#app,#map{
 .trail-card .profile-note .status-badge{display:none}.trail-card .profile-note{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 
 
-/* V3.3.3 Stage 1: focus-driven carousel + vertical bottom-sheet states */
-.carousel-shell{
-  --sheet-peek-h:46px;
-  --sheet-card-h:188px;
-  --sheet-half-h:min(48dvh, 420px);
-  --sheet-full-h:min(74dvh, 680px);
-  left:0;right:0;
-  bottom:calc(58px + env(safe-area-inset-bottom,0px));
-  height:var(--sheet-card-h);
-  padding:0 0 8px;
-  border-radius:24px 24px 0 0;
-  transition:height .22s ease, transform .22s ease, opacity .18s ease;
-  touch-action:pan-y;
-}
-.carousel-shell[data-sheet-state="peek"]{height:var(--sheet-peek-h);}
-.carousel-shell[data-sheet-state="card"]{height:var(--sheet-card-h);}
-.carousel-shell[data-sheet-state="half"]{height:var(--sheet-half-h);}
-.carousel-shell[data-sheet-state="full"]{height:var(--sheet-full-h);}
-.carousel-shell.dragging{transition:none;}
-.carousel-handle{
-  width:76px;height:10px;margin:6px auto 6px;border-radius:999px;
-  background:rgba(16,32,29,.36);touch-action:none;
-}
-.carousel-peek-info{
-  display:none;margin:0 14px;padding:9px 12px;border-radius:18px;
-  background:rgba(255,255,255,.78);backdrop-filter:blur(18px);
-  border:1px solid rgba(255,255,255,.9);box-shadow:0 8px 28px rgba(7,28,24,.12);
-  align-items:center;gap:8px;white-space:nowrap;overflow:hidden;
-}
-.carousel-peek-info b{color:var(--green);font-weight:900;flex:0 0 auto;}
-.carousel-peek-info span{overflow:hidden;text-overflow:ellipsis;font-weight:800;}
-.carousel-peek-info em{font-style:normal;color:var(--muted);font-size:.76rem;flex:0 0 auto;}
-.carousel-shell[data-sheet-state="peek"] .carousel-peek-info{display:flex;}
-.carousel-shell[data-sheet-state="peek"] .carousel{display:none;}
-.carousel{
-  height:calc(100% - 22px);align-items:flex-start;scroll-padding-left:calc(50vw - 145px);scroll-padding-right:calc(50vw - 145px);
-  overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch;
-}
-.carousel-shell[data-sheet-state="half"] .carousel,
-.carousel-shell[data-sheet-state="full"] .carousel{height:calc(100% - 22px);align-items:stretch;}
-.carousel-shell[data-sheet-state="half"] .trail-card,
-.carousel-shell[data-sheet-state="full"] .trail-card{height:calc(100% - 14px);overflow-y:auto;overscroll-behavior:contain;}
-.trail-card{scroll-snap-stop:always;}
-.trail-card.active{outline:3px solid rgba(11,107,85,.34);box-shadow:0 14px 42px rgba(7,28,24,.22);}
-.detail-sheet{bottom:calc(58px + env(safe-area-inset-bottom,0px));max-height:calc(74dvh - var(--safe-top));}
-@media(min-width:820px){.carousel-shell{left:50%;right:18px;bottom:calc(78px + env(safe-area-inset-bottom,0px));}.detail-sheet{bottom:calc(78px + env(safe-area-inset-bottom,0px));}}
+/* V3.3.3 Statusmodul */
+.status-badge{gap:6px;}
+.status-badge i{display:inline-block;width:9px;height:9px;border-radius:50%;background:#9aa8a4;box-shadow:0 0 0 2px rgba(255,255,255,.75)}
+.status-badge.open i{background:#24aa5a}.status-badge.limited i{background:#ff9500}.status-badge.closed i{background:#ff3b30}.status-badge.unknown i{background:#9aa8a4}
+.status-source{margin:9px 0 2px;padding:9px 11px;border-radius:15px;background:rgba(255,255,255,.76);border:1px solid var(--line);color:var(--muted);font-size:.74rem;line-height:1.35}
+.filter-chip[data-filter="status"][data-value="open"].active{background:#24aa5a;color:#fff;border-color:#24aa5a}
+.filter-chip[data-filter="status"][data-value="limited"].active{background:#ff9500;color:#fff;border-color:#ff9500}
+.filter-chip[data-filter="status"][data-value="closed"].active{background:#ff3b30;color:#fff;border-color:#ff3b30}
+.pr-marker.status-limited .pr-num,.pr-marker.status-closed .pr-num{font-weight:950}

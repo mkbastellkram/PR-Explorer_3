@@ -1,23 +1,47 @@
 # PR Explorer Madeira · V3.3.3
 
-Stage 1 Patch: synchronisiertes PR-Karussell-Bottom-Sheet.
+Statusmodul auf Basis von MadeiraJourney / IFCN-Aggregat, Stand 05.06.2026 15:40.
 
-## Geändert
+## Neu in V3.3.3
 
-- Karussell-Reihenfolge bleibt stabil; aktive PR wird nicht mehr nach vorne sortiert.
-- `scrollIntoView()` läuft nur noch bei externer Auswahl aus Pin/Journal, nicht mehr bei jedem PR-Wechsel.
-- Aktive PR wird automatisch durch die horizontal zentrierte Karussell-Kachel bestimmt.
-- Kein zusätzlicher Tap auf die Kachel erforderlich.
-- Kachel-Tap selbst löst keinen ungewollten PR-Wechsel und kein Springen mehr aus.
-- Bottom-Sheet-Zustände für Karussell: `peek`, `card`, `half`, `full`.
-- Peek-Leiste zeigt aktive PR-Kurzinfo.
-- Sheet-Höhe bleibt global erhalten, wenn horizontal zum nächsten PR gewechselt wird.
-- iPhone-Safe-Area unten für Karussell und Detail-Sheet nachgezogen.
+- lokale Statusdatei `window.PRX_DATA.statuses`
+- Status-Ampel am PR-Pin aktiv: offen / eingeschränkt / gesperrt / unbekannt
+- Status-Chip in PR-Karte und Detail-Sheet
+- Statusfilter: Offen, Eingeschränkt, Gesperrt
+- Quellen-/Stand-Hinweis im Detail-Sheet
+- PR3 Madeira bleibt offen; Porto-Santo-PR3 ist geschlossen und wird nicht auf Madeira-PR3 übertragen
 
-## Nicht Bestandteil dieses Patches
+## Statusdaten
 
-- Transparenzregler
-- GPX/KML-Farb- und Kontureinstellungen
-- nachgezeichneter Hiking-Layer
-- Pin-Symbolauswahl
-- POI-Clustering
+Quelle: MadeiraJourney Trails Status, laut Seite aus IFCN-Daten aggregiert.
+Offizielle Prüfung vor jeder Wanderung weiterhin erforderlich.
+
+Geschlossen:
+- PR1.3
+- PR7
+- PR10
+- PR20
+- PR27
+- PR28
+
+Eingeschränkt:
+- PR4
+- PR12
+
+Offen:
+- übrige im Datenbestand vorhandene Madeira-PRs laut Statusliste / Einzelliste
+
+## Test
+
+Öffnen mit:
+
+`index.html?v=3.3.3`
+
+Testpunkte:
+
+1. Ampelpunkte an Pins sichtbar.
+2. Statusfilter begrenzt die PRs.
+3. Detail-Sheet zeigt Quelle und Stand.
+4. PR4 / PR12 orange.
+5. PR1.3 / PR7 / PR10 / PR20 / PR27 / PR28 rot.
+6. PR3 Madeira bleibt grün/offen.
