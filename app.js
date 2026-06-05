@@ -11,7 +11,7 @@ const hav = (a,b,c,d) => { const R=6371, to=x=>x*Math.PI/180; const dLat=to(c-a)
 
 let state = {
   mode:'map', level:'all', query:'', onlyFav:false, base:'topo',
-  layers:{pins:true, tracks:true, drives:true, context:false},
+  layers:{pins:true, tracks:true, drives:true, hiking:true, context:false},
   selectedTrailId:null, selectedPoiIds:[], selectedWebcamIds:[], solo:false,
   sheetTab:'overview', travel:JSON.parse(localStorage.getItem('prxTravel')||'[]'), favs:new Set(JSON.parse(localStorage.getItem('prxFavs')||'[]'))
 };
@@ -19,16 +19,18 @@ let state = {
 const trails = D.trails;
 const byId = Object.fromEntries(trails.map(t=>[t.id,t]));
 let filtered = [...trails];
-let map, bases={}, activeBase, layers={}, markers={};
+let map, bases={}, overlays={}, activeBase, layers={}, markers={};
 
 function initMap(){
   map = L.map('map', {zoomControl:false, attributionControl:false, preferCanvas:true}).setView([32.755,-16.94],10);
   bases.light = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19});
   bases.topo = L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17});
   bases.sat = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19});
+  overlays.hiking = L.tileLayer('https://tile.waymarkedtrails.org/hiking/{z}/{x}/{y}.png',{maxZoom:18, opacity:.72, pane:'overlayPane'});
   activeBase = bases.topo.addTo(map);
+  overlays.hiking.addTo(map);
   layers.pins=L.layerGroup().addTo(map); layers.tracks=L.layerGroup().addTo(map); layers.drives=L.layerGroup().addTo(map);
-  layers.context=L.layerGroup().addTo(map); layers.highlight=L.layerGroup().addTo(map); layers.home=L.layerGroup().addTo(map);
+  layers.context=L.layerGroup().addTo(map); layers.highlight=L.layerGroup().addTo(map); layers.endpoints=L.layerGroup().addTo(map); layers.home=L.layerGroup().addTo(map);
   const homeIcon=L.divIcon({className:'',html:'<div class="home-marker">⌂</div>',iconSize:[34,34],iconAnchor:[17,17]});
   L.marker([D.home.lat,D.home.lon],{icon:homeIcon,title:D.home.name}).bindPopup(`<b>${esc(D.home.name)}</b><br>Hotel / Home-Pin`).addTo(layers.home);
   renderMap();
@@ -49,16 +51,53 @@ function applyFilters(){
   renderMap(); renderJournal(); renderCarousel();
 }
 
+
+function trailStatus(t){
+  const raw = String(t.status || (D.statuses && D.statuses[t.id]) || '').toLowerCase();
+  if(raw.includes('offen') || raw.includes('open')) return {key:'open', label:'offen'};
+  if(raw.includes('eingesch') || raw.includes('limited') || raw.includes('teil')) return {key:'limited', label:'eingeschränkt'};
+  if(raw.includes('gesperrt') || raw.includes('closed')) return {key:'closed', label:'gesperrt'};
+  return {key:'unknown', label:'Status prüfen'};
+}
+function statusHtml(t){ const st=trailStatus(t); return `<span class="status-badge ${st.key}">${st.key==='open'?'●':st.key==='limited'?'▲':st.key==='closed'?'■':'?'} ${esc(st.label)}</span>`; }
+function lineCased(group, coords, color, weight=5, opacity=.9){
+  if(!coords || coords.length<2) return;
+  addLine(group, coords, {color:'#ffffff',weight:weight+3,opacity:.78,lineCap:'round',lineJoin:'round'});
+  addLine(group, coords, {color,weight,opacity,lineCap:'round',lineJoin:'round'});
+}
+function endpointIcon(label, cls=''){
+  return L.divIcon({className:'',html:`<div class="endpoint-marker ${cls}">${label}</div>`,iconSize:[28,28],iconAnchor:[14,14]});
+}
+function renderEndpoints(id){
+  layers.endpoints.clearLayers();
+  if(!state.solo || !id) return;
+  const tr=D.tracks[id]||[], dr=D.drives[id]||[], t=byId[id];
+  if(tr.length){
+    L.marker(tr[0],{icon:endpointIcon('S'),title:'Start'}).bindPopup('<b>Start Wanderung</b>').addTo(layers.endpoints);
+    L.marker(tr[tr.length-1],{icon:endpointIcon('Z','end'),title:'Ziel'}).bindPopup('<b>Ziel Wanderung</b>').addTo(layers.endpoints);
+  }
+  if(dr.length){ L.marker(dr[dr.length-1],{icon:endpointIcon('P','drive'),title:'Anfahrt Ziel'}).bindPopup('<b>Anfahrt / Parkplatz</b>').addTo(layers.endpoints); }
+  if(t && (!tr.length && !dr.length)) L.marker([t.lat,t.lon],{icon:endpointIcon('PR'),title:t.name}).addTo(layers.endpoints);
+}
+function syncOverlayLayers(){
+  if(overlays.hiking){
+    const on=map.hasLayer(overlays.hiking);
+    if(state.layers.hiking && !on) overlays.hiking.addTo(map);
+    if(!state.layers.hiking && on) map.removeLayer(overlays.hiking);
+  }
+}
+
 function markerHtml(t){
   const active = state.selectedTrailId===t.id; const dim=state.solo && !active;
-  return `<div class="pr-marker ${active?'active':''} ${dim?'dim':''}">${esc(t.number.replace('PR ','').replace('.','·'))}</div>`;
+  const st=trailStatus(t);
+  return `<div class="pr-marker ${active?'active':''} ${dim?'dim':''} status-${st.key}">${esc(t.number.replace('PR ','').replace('.','·'))}</div>`;
 }
 function markerIcon(t){ return L.divIcon({className:'',html:markerHtml(t),iconSize:[34,34],iconAnchor:[17,17]}); }
 function addLine(group, coords, opts){ if(!coords || coords.length<2) return null; return L.polyline(coords, opts).addTo(group); }
 
 function renderMap(){
   if(!map) return;
-  layers.pins.clearLayers(); layers.tracks.clearLayers(); layers.drives.clearLayers(); markers={};
+  layers.pins.clearLayers(); layers.tracks.clearLayers(); layers.drives.clearLayers(); layers.endpoints?.clearLayers(); syncOverlayLayers(); markers={};
   const showList = state.solo && state.selectedTrailId ? [byId[state.selectedTrailId]].filter(Boolean) : filtered;
   if(state.layers.pins){
     showList.forEach(t=>{
@@ -70,10 +109,11 @@ function renderMap(){
   if(state.selectedTrailId){
     const id=state.selectedTrailId;
     const tr=D.tracks[id], dr=D.drives[id];
-    if(state.layers.tracks) addLine(layers.tracks,tr,{color:'#ff3b30',weight:5,opacity:.95,lineCap:'round'});
-    if(state.layers.drives) addLine(layers.drives,dr,{color:'#007aff',weight:5,opacity:.82,lineCap:'round'});
+    if(state.layers.tracks) lineCased(layers.tracks,tr,'#ff3b30', state.solo?6:5, .96);
+    if(state.layers.drives) lineCased(layers.drives,dr,'#007aff', state.solo?6:5, .84);
+    renderEndpoints(id);
   } else if(!state.solo && state.layers.tracks){
-    filtered.forEach(t=>{ if(D.tracks[t.id]) addLine(layers.tracks,D.tracks[t.id],{color:'#ff3b30',weight:2,opacity:.28}); });
+    filtered.forEach(t=>{ if(D.tracks[t.id]) addLine(layers.tracks,D.tracks[t.id],{color:'#ff3b30',weight:2,opacity:.24,lineCap:'round'}); });
   }
   renderContextMarkers();
 }
@@ -124,30 +164,32 @@ function renderCarousel(){
 function cardHtml(t){
   const lev=normLevel(t.level); const active=t.id===state.selectedTrailId; const fav=state.favs.has(t.id);
   return `<article class="trail-card ${active?'active':''}" data-id="${esc(t.id)}">
-    <div class="card-top"><div class="num">${esc(t.number)}</div><div class="level ${esc(lev)}">${esc(t.level||'k.A.')}</div></div>
+    <div class="card-top"><div class="num">${esc(t.number)}</div><div style="display:flex;gap:6px;align-items:center">${statusHtml(t)}<div class="level ${esc(lev)}">${esc(t.level||'k.A.')}</div></div></div>
     <h3>${esc(t.name)}</h3>
     <div class="meta"><span>${fmtKm(t.distanceKm)}</span><span>${fmt(t.duration)}</span><span>${fmtMin(t.driveMin)}</span></div>
+    <div class="profile-note">${D.tracks[t.id]?'GPX ✓':'GPX –'} · ${D.drives[t.id]?'KML ✓':'KML –'} · ${statusHtml(t)}</div>
     <div class="card-actions"><button class="pillbtn primary" data-act="detail">Details</button><button class="pillbtn" data-act="solo">${state.solo&&active?'Übersicht':'Solo'}</button><button class="pillbtn warn" data-act="fav">${fav?'★':'☆'}</button></div>
   </article>`;
 }
 function toggleSolo(){
   if(!state.selectedTrailId) return;
-  state.solo=!state.solo; clearContext(); renderMap(); renderCarousel(); renderSheet(); fitAll(); toast(state.solo?'Solo-PR aktiv':'Gesamtkarte aktiv');
+  state.solo=!state.solo; clearContext(); if(state.solo){state.layers.tracks=true;state.layers.drives=true;} renderMap(); renderCarousel(); renderSheet(); if(state.solo) centerTrail(state.selectedTrailId,true); else fitAll(); updateLayerButtons(); toast(state.solo?'Solo-PR freigestellt':'Gesamtkarte aktiv');
 }
 function toggleFav(id){ state.favs.has(id)?state.favs.delete(id):state.favs.add(id); save(); applyFilters(); renderSheet(); }
 
-function openSheet(tab='overview'){ state.sheetTab=tab; $('detailSheet').classList.remove('hidden'); renderSheet(); }
+function openSheet(tab='overview'){ state.sheetTab=tab; const sh=$('detailSheet'); sh.classList.remove('hidden'); sh.style.transform='translateY(0px)'; renderSheet(); }
 function closeSheet(){ $('detailSheet').classList.add('hidden'); }
 function renderSheet(){
   const id=state.selectedTrailId, t=byId[id], root=$('sheetContent'); if(!t){root.innerHTML=''; return;}
-  root.innerHTML = `<div class="sheet-head"><div class="sheet-title"><small>${esc(t.number)} · ${esc(t.region||'Madeira')}</small><h2>${esc(t.name)}</h2></div><button class="close" id="closeSheet">×</button></div>
-    <div class="seg"><button data-tab="overview">Übersicht</button><button data-tab="webcams">Webcams</button><button data-tab="pois">Sehenswürdigkeiten</button><button data-tab="drive">Anfahrt</button></div>
+  root.innerHTML = `<div class="sheet-head"><div class="sheet-title"><small>${esc(t.number)} · ${esc(t.region||'Madeira')} · ${statusHtml(t)}</small><h2>${esc(t.name)}</h2></div><button class="close" id="closeSheet">×</button></div>
+    <div class="seg"><button data-tab="overview">Übersicht</button><button data-tab="profile">Profil</button><button data-tab="webcams">Webcams</button><button data-tab="pois">Sehenswürdigkeiten</button><button data-tab="drive">Anfahrt</button></div>
     <div class="facts"><div class="fact"><small>Distanz</small><b>${fmtKm(t.distanceKm)}</b></div><div class="fact"><small>Dauer</small><b>${fmt(t.duration)}</b></div><div class="fact"><small>Anfahrt</small><b>${fmtMin(t.driveMin)}</b></div><div class="fact"><small>Höhenmeter</small><b>${fmt(t.elev)} m</b></div></div>
     <div id="tabContent"></div>`;
   root.querySelector('#closeSheet').onclick=closeSheet;
   root.querySelectorAll('[data-tab]').forEach(b=>{ b.classList.toggle('active',b.dataset.tab===state.sheetTab); b.onclick=()=>{state.sheetTab=b.dataset.tab; renderSheet();}; });
   const tab=$('tabContent');
   if(state.sheetTab==='overview') tab.innerHTML=overviewHtml(t);
+  if(state.sheetTab==='profile') tab.innerHTML=profileHtml(t);
   if(state.sheetTab==='webcams') tab.innerHTML=contextHtml('webcam', relatedWebcams(t));
   if(state.sheetTab==='pois') tab.innerHTML=contextHtml('poi', relatedPois(t));
   if(state.sheetTab==='drive') tab.innerHTML=driveHtml(t);
@@ -158,9 +200,28 @@ function renderSheet(){
 }
 function overviewHtml(t){
   return `<div class="sheet-section"><h4>Kontextnavigation</h4><p class="muted">Kachel nach oben = Details. Webcams und Sehenswürdigkeiten werden nur für den aktiven PR-Kontext eingeblendet. Beim Wechsel zum nächsten PR werden alte Kontextmarker gelöscht.</p></div>
-  <div class="card-actions"><button class="pillbtn primary" onclick="window.PRX.openTab('webcams')">Webcams</button><button class="pillbtn primary" onclick="window.PRX.openTab('pois')">Sehenswürdigkeiten</button><button class="pillbtn" onclick="window.PRX.addTrailTravel()">Zur Reise</button></div>
+  <div class="card-actions"><button class="pillbtn primary" onclick="window.PRX.openTab('webcams')">Webcams</button><button class="pillbtn primary" onclick="window.PRX.openTab('pois')">Sehenswürdigkeiten</button><button class="pillbtn" onclick="window.PRX.toggleSolo()">Solo</button><button class="pillbtn" onclick="window.PRX.addTrailTravel()">Zur Reise</button></div>${profileHtml(t)}
   <div class="sheet-section"><h4>Hinweis</h4><p class="muted">${esc(t.hint||'Keine Zusatznotiz vorhanden.')}</p></div>`;
 }
+
+function profileHtml(t){
+  const pts=D.tracks[t.id]||[];
+  const high=Number(t.high)||0, low=Number(t.low)||0;
+  if(!pts.length || !high || !low || high===low) return `<div class="profile-card"><b>Höhenprofil</b><p class="muted">Für diesen PR sind im aktuellen Datenstand keine ausreichenden Profilwerte vorhanden.</p></div>`;
+  let d=[0], total=0;
+  for(let i=1;i<pts.length;i++){ total+=hav(pts[i-1][0],pts[i-1][1],pts[i][0],pts[i][1]); d.push(total); }
+  const w=320,h=120,pad=10;
+  const coords=d.map((x,i)=>{
+    const ratio= total ? x/total : i/(d.length-1||1);
+    // Synthetisches Profil aus high/low, weil die eingebetteten GPX-Koordinaten keine Höhenpunkte enthalten.
+    const wave=(Math.sin(ratio*Math.PI*1.2)+0.35*Math.sin(ratio*Math.PI*4.1)+1.35)/2.7;
+    const elev=low+(high-low)*Math.max(0,Math.min(1,wave));
+    const sx=pad+ratio*(w-pad*2), sy=h-pad-((elev-low)/(high-low))*(h-pad*2);
+    return `${sx.toFixed(1)},${sy.toFixed(1)}`;
+  }).join(' ');
+  return `<div class="profile-card"><b>Höhenprofil</b><svg viewBox="0 0 ${w} ${h}" role="img" aria-label="Höhenprofil"><defs><linearGradient id="pg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0b6b55" stop-opacity=".30"/><stop offset="1" stop-color="#0b6b55" stop-opacity=".02"/></linearGradient></defs><polyline points="${coords}" fill="none" stroke="#0b6b55" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/><polygon points="${pad},${h-pad} ${coords} ${w-pad},${h-pad}" fill="url(#pg)"/></svg><div class="profile-meta"><span>${Math.round(low)} m tiefster Punkt</span><span>${Math.round(high)} m höchster Punkt</span><span>${Math.round(Number(t.elev)||high-low)} hm</span></div><div class="profile-note">Hinweis: Die aktuelle GPX-Extraktion enthält Koordinaten, aber keine Höhenpunkte. Das Profil nutzt daher die vorhandenen Hoch-/Tiefwerte als Vorschau und muss später durch echte GPX-Elevation ersetzt werden.</div></div>`;
+}
+
 function driveHtml(t){
   const g=`https://www.google.com/maps/dir/?api=1&origin=${D.home.lat},${D.home.lon}&destination=${t.lat},${t.lon}&travelmode=driving`;
   return `<div class="sheet-section"><h4>Anfahrt ab ${esc(D.home.name)}</h4><p class="muted">${fmtKm(t.driveKm)} · ${fmtMin(t.driveMin)} · Zielkoordinate ${t.lat.toFixed(5)}, ${t.lon.toFixed(5)}</p></div><div class="card-actions"><button class="pillbtn primary" data-open="${g}">Google Maps</button><button class="pillbtn" onclick="window.PRX.fitSelected()">Route einpassen</button></div>`;
@@ -230,12 +291,24 @@ function bind(){
   document.querySelectorAll('.mode').forEach(b=>b.onclick=()=>setMode(b.dataset.mode));
   $('closeTravel').onclick=()=>setMode('map');
   $('sheetHandle').onclick=()=>openSheet('overview'); $('sheetGrip').onclick=closeSheet;
+  bindSheetDrag();
 }
+
+function bindSheetDrag(){
+  const sh=$('detailSheet'), grip=$('sheetGrip'); if(!sh||!grip||grip._bound) return; grip._bound=true;
+  let startY=0, dy=0, dragging=false;
+  grip.addEventListener('pointerdown',e=>{dragging=true; startY=e.clientY; dy=0; sh.classList.add('dragging'); grip.setPointerCapture(e.pointerId);});
+  grip.addEventListener('pointermove',e=>{ if(!dragging) return; dy=e.clientY-startY; if(dy>0) sh.style.transform=`translateY(${dy}px)`; });
+  grip.addEventListener('pointerup',e=>{ if(!dragging) return; dragging=false; sh.classList.remove('dragging'); try{grip.releasePointerCapture(e.pointerId)}catch(_){}; if(dy>90){ closeSheet(); } else { sh.style.transform='translateY(0px)'; } });
+  grip.addEventListener('pointercancel',()=>{dragging=false; sh.classList.remove('dragging'); sh.style.transform='translateY(0px)';});
+}
+
 
 window.PRX={
   openTab(tab){ openSheet(tab); },
   addTrailTravel(){ if(state.selectedTrailId) addTravel(state.selectedTrailId,'trail'); },
-  fitSelected(){ if(state.selectedTrailId) centerTrail(state.selectedTrailId,true); }
+  fitSelected(){ if(state.selectedTrailId) centerTrail(state.selectedTrailId,true); },
+  toggleSolo(){ toggleSolo(); }
 };
 
 function boot(){ initMap(); bind(); applyFilters(); updateLayerButtons(); if('serviceWorker' in navigator) navigator.serviceWorker.register('./service-worker.js').catch(()=>{}); }
